@@ -1,11 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Claims;
 using System.Threading.Tasks;
+using AgileConfig.Server.Apisite.Models;
 using AgileConfig.Server.IService;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AgileConfig.Server.Apisite.Controllers
@@ -20,106 +18,63 @@ namespace AgileConfig.Server.Apisite.Controllers
             _sysLogService = sysLogService;
         }
 
-        public async Task<IActionResult> Login()
+
+        [HttpPost("admin/jwt/login")]
+        public async Task<IActionResult> Login4AntdPro([FromBody] LoginVM model)
         {
-            if ((await HttpContext.AuthenticateAsync()).Succeeded)
-            {
-                return Redirect("/");
-            }
-
-            if (!await _settingService.HasAdminPassword())
-            {
-                return Redirect("InitPassword");
-            }
-
-            return View();
-        }
-
-        [HttpPost]
-        public async Task<IActionResult> Login([FromForm]string password)
-        {
+            string password = model.password;
             if (string.IsNullOrEmpty(password))
             {
-                ViewBag.ErrorMessage = "密码不能为空";
-                return View();
+                return Json(new
+                {
+                    status = "error",
+                    message = "密码不能为空"
+                });
             }
 
             var result = await _settingService.ValidateAdminPassword(password);
             if (result)
             {
-                var claims = new List<Claim>
-                {
-                  new Claim("UserName","Administrator")
-                };
 
-                var claimsIdentity = new ClaimsIdentity(
-                    claims, CookieAuthenticationDefaults.AuthenticationScheme);
-
-                var authProperties = new AuthenticationProperties
-                {
-                    //AllowRefresh = <bool>,
-                    // Refreshing the authentication session should be allowed.
-
-                    //ExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(10),
-                    // The time at which the authentication ticket expires. A 
-                    // value set here overrides the ExpireTimeSpan option of 
-                    // CookieAuthenticationOptions set with AddCookie.
-
-                    //IsPersistent = true,
-                    // Whether the authentication session is persisted across 
-                    // multiple requests. Required when setting the 
-                    // ExpireTimeSpan option of CookieAuthenticationOptions 
-                    // set with AddCookie. Also required when setting 
-                    // ExpiresUtc.
-
-                    //IssuedUtc = <DateTimeOffset>,
-                    // The time at which the authentication ticket was issued.
-
-                    //RedirectUri = <string>
-                    // The full path or absolute URI to be used as an http 
-                    // redirect response value.
-                };
-
-                await HttpContext.SignInAsync(
-                    CookieAuthenticationDefaults.AuthenticationScheme,
-                    new ClaimsPrincipal(claimsIdentity),
-                    authProperties);
+                var jwt = JWT.GetToken();
 
                 //addlog
-                await _sysLogService.AddSysLogSync(new Data.Entity.SysLog
+                await _sysLogService.AddSysLogAsync(new Data.Entity.SysLog
                 {
                     LogTime = DateTime.Now,
                     LogType = Data.Entity.SysLogType.Normal,
                     LogText = $"管理员登录成功"
                 });
 
-                return Redirect("/");
+                return Json(new
+                {
+                    status = "ok",
+                    token = jwt,
+                    type = "Bearer",
+                    currentAuthority = "admin"
+                });
             }
 
-            ViewBag.ErrorMessage = "登录失败：密码不正确";
-            return View();
+            return Json(new
+            {
+                status = "error",
+                message = "密码错误"
+            });
         }
 
         /// <summary>
-        /// 初始化密码
+        /// is password inited ?
         /// </summary>
         /// <returns></returns>
         [HttpGet]
-        public async Task<IActionResult> InitPassword()
+        public async Task<IActionResult> PasswordInited()
         {
             var has = await _settingService.HasAdminPassword();
-            if (has)
+            return Json(new
             {
-                return Redirect("login");
-            }
-
-            return View();
-        }
-
-        [HttpGet]
-        public IActionResult InitPasswordSuccess()
-        {
-            return View();
+                success = true,
+                data = has
+            });
         }
 
         /// <summary>
@@ -127,49 +82,165 @@ namespace AgileConfig.Server.Apisite.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpPost]
-        public async Task<IActionResult> InitPassword([FromForm]string password, [FromForm]string confirmPassword)
+        public async Task<IActionResult> InitPassword([FromBody] InitPasswordVM model)
         {
+            var password = model.password;
+            var confirmPassword = model.confirmPassword;
+
             if (string.IsNullOrEmpty(password) || string.IsNullOrEmpty(confirmPassword))
             {
-                ViewBag.ErrorMessage = "密码不能为空";
-                return View();
+                return Json(new
+                {
+                    message = "密码不能为空",
+                    success = false
+                });
             }
 
             if (password.Length > 50 || confirmPassword.Length > 50)
             {
-                ViewBag.ErrorMessage = "密码最长不能超过50位";
-                return View();
+                return Json(new
+                {
+                    message = "密码最长不能超过50位",
+                    success = false
+                });
             }
 
             if (password != confirmPassword)
             {
-                ViewBag.ErrorMessage = "输入的两次密码不一致";
-                return View();
+                return Json(new
+                {
+                    message = "输入的两次密码不一致",
+                    success = false
+                });
             }
 
             if (await _settingService.HasAdminPassword())
             {
-                ViewBag.ErrorMessage = "密码已经设置过，不需要再次设置";
-                return View();
+                return Json(new
+                {
+                    message = "密码已经设置过，不需要再次设置",
+                    success = false
+                });
             }
 
             var result = await _settingService.SetAdminPassword(password);
 
             if (result)
             {
-                await _sysLogService.AddSysLogSync(new Data.Entity.SysLog
+                await _sysLogService.AddSysLogAsync(new Data.Entity.SysLog
                 {
                     LogTime = DateTime.Now,
                     LogType = Data.Entity.SysLogType.Normal,
                     LogText = $"管理员密码初始化成功"
                 });
 
-                return Redirect("InitPasswordSuccess");
+                return Json(new
+                {
+                    success = true
+                });
             }
             else
             {
-                ViewBag.ErrorMessage = "初始化密码失败";
-                return View();
+                return Json(new
+                {
+                    message = "初始化密码失败",
+                    success = false
+                });
+            }
+        }
+
+        [HttpPost]
+        [Authorize]
+        public async Task<IActionResult> ChangePassword([FromBody]ChangePasswordVM model)
+        {
+            if (Appsettings.IsPreviewMode)
+            {
+                return Json(new
+                {
+                    success = false,
+                    message = "演示模式请勿修改管理密码"
+                });
+            }
+
+            var password = model.password;
+            var confirmPassword = model.confirmPassword;
+            var oldPassword = model.oldPassword;
+
+            if (string.IsNullOrEmpty(oldPassword) || string.IsNullOrEmpty(oldPassword))
+            {
+                return Json(new
+                {
+                    message = "原始密码不能为空",
+                    err_code = "err_resetpassword_01",
+                    success = false
+                });
+            }
+
+            var validOld = await _settingService.ValidateAdminPassword(oldPassword);
+
+            if (!validOld)
+            {
+                return Json(new
+                {
+                    message = "原始密码错误，请重新再试",
+                    err_code = "err_resetpassword_02",
+                    success = false
+                });
+            }
+
+            if (string.IsNullOrEmpty(password) || string.IsNullOrEmpty(confirmPassword))
+            {
+                return Json(new
+                {
+                    message = "新密码不能为空",
+                    err_code = "err_resetpassword_03",
+                    success = false
+                });
+            }
+
+            if (password.Length > 50 || confirmPassword.Length > 50)
+            {
+                return Json(new
+                {
+                    message = "新密码最长不能超过50位",
+                    err_code = "err_resetpassword_04",
+                    success = false
+                });
+            }
+
+            if (password != confirmPassword)
+            {
+                return Json(new
+                {
+                    message = "输入的两次新密码不一致",
+                    err_code = "err_resetpassword_05",
+                    success = false
+                });
+            }
+
+            var result = await _settingService.SetAdminPassword(password);
+
+            if (result)
+            {
+                await _sysLogService.AddSysLogAsync(new Data.Entity.SysLog
+                {
+                    LogTime = DateTime.Now,
+                    LogType = Data.Entity.SysLogType.Normal,
+                    LogText = $"修改管理员密码成功"
+                });
+
+                return Json(new
+                {
+                    success = true
+                });
+            }
+            else
+            {
+                return Json(new
+                {
+                    message = "修改密码失败",
+                    success = false
+                });
             }
         }
 

@@ -1,4 +1,5 @@
 ﻿using Agile.Config.Protocol;
+using AgileConfig.Server.Common;
 using AgileConfig.Server.Data.Entity;
 using AgileConfig.Server.IService;
 using Microsoft.AspNetCore.Authorization;
@@ -18,8 +19,9 @@ namespace AgileConfig.Server.Apisite.Controllers
         private readonly IRemoteServerNodeProxy _remoteServerNodeProxy;
         private readonly ILogger _logger;
 
-        public RemoteServerProxyController(IRemoteServerNodeProxy remoteServerNodeProxy,
+        public RemoteServerProxyController(
             IServerNodeService serverNodeService,
+            IRemoteServerNodeProxy remoteServerNodeProxy,
             ILoggerFactory loggerFactory,
             ISysLogService sysLogService)
         {
@@ -36,6 +38,15 @@ namespace AgileConfig.Server.Apisite.Controllers
         [HttpPost]
         public async Task<IActionResult> Client_Offline(string address, string clientId)
         {
+            if (Appsettings.IsPreviewMode)
+            {
+                return Json(new
+                {
+                    success = false,
+                    message = "演示模式请勿断开客户端"
+                });
+            }
+
             var action = new WebsocketAction { Action = "offline" };
             var result = await _remoteServerNodeProxy.OneClientDoActionAsync(address, clientId, action);
 

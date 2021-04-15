@@ -1,7 +1,5 @@
 ﻿using System;
-using AgileConfig.Server.Common;
 using AgileConfig.Server.IService;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
@@ -18,32 +16,30 @@ namespace AgileConfig.Server.Apisite.Controllers
         }
 
         [AllowAnonymous]
-        public async Task<IActionResult> Index()
+        public async Task<IActionResult> IndexAsync()
         {
-            if (!IsAdminConsoleMode)
+            if (!Appsettings.IsAdminConsoleMode)
             {
                 return Content($"AgileConfig Node is running now , {DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")} .");
             }
 
-            var auth = (await HttpContext.AuthenticateAsync()).Succeeded;
-            if (auth)
+            if (!await _settingService.HasAdminPassword())
             {
-                return View();
-            }
-            else
-            {
-                return Redirect("/Admin/Login");
+                return Redirect("/ui#/user/initpassword");
             }
 
+            return Redirect("/ui");
         }
-        public IActionResult GetView(string viewName)
-        {
-            if (IsAdminConsoleMode)
-            {
-                return View(viewName);
-            }
 
-            return Content("");
+        public async Task<IActionResult> SystemInfo()
+        {
+            string appVer = System.Reflection.Assembly.GetAssembly(typeof(AgileConfig.Server.Apisite.Program)).GetName().Version.ToString();
+
+            return Json(new { 
+                appVer,
+                userName="admin",
+                passwordInited=await _settingService.HasAdminPassword()
+            });
         }
 
         [AllowAnonymous]
@@ -52,6 +48,5 @@ namespace AgileConfig.Server.Apisite.Controllers
             return Content("ok");
         }
 
-        private bool IsAdminConsoleMode => "true".Equals(Configuration.Config["adminConsole"], StringComparison.CurrentCultureIgnoreCase);
     }
 }

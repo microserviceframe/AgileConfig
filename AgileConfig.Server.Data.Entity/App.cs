@@ -1,31 +1,38 @@
-﻿using System;
+﻿using FreeSql.DataAnnotations;
+using System;
 using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 using System.Text;
 
 namespace AgileConfig.Server.Data.Entity
 {
-    [Table("app")]
+    public enum AppType
+    {
+        PRIVATE,
+        Inheritance,
+    }
+
+    [Table(Name = "agc_app")]
     public class App
     {
-        [Key]
-        [Column("id" ,TypeName = "nvarchar(36)")]
+        [Column(Name= "id" , StringLength = 36)]
         public string Id { get; set; }
 
-        [Column("name" , TypeName ="nvarchar(50)")]
+        [Column(Name = "name" , StringLength = 50)]
         public string Name { get; set; }
 
-        [Column("secret", TypeName = "nvarchar(36)")]
+        [Column(Name = "secret", StringLength = 36)]
         public string Secret { get; set; }
 
-        [Column("create_time")]
+        [Column(Name = "create_time")]
         public DateTime CreateTime { get; set; }
 
-        [Column("update_time")]
+        [Column(Name = "update_time")]
         public DateTime? UpdateTime { get; set; }
 
-        [Column("enabled")]
+        [Column(Name = "enabled")]
         public bool Enabled { get; set; }
+
+        [Column(Name = "type")]
+        public AppType Type { get; set; }
     }
 }

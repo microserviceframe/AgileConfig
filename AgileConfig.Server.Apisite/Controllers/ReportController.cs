@@ -18,12 +18,14 @@ namespace AgileConfig.Server.Apisite.Controllers
         private readonly IConfigService _configService;
         private readonly IAppService _appService;
         private readonly IServerNodeService _serverNodeService;
+        private readonly IRemoteServerNodeProxy _remoteServerNodeProxy;
 
-        public ReportController(IConfigService configService, IAppService appService, IServerNodeService serverNodeService)
+        public ReportController(IConfigService configService, IAppService appService, IServerNodeService serverNodeService, IRemoteServerNodeProxy remoteServerNodeProxy)
         {
             _appService = appService;
             _configService = configService;
             _serverNodeService = serverNodeService;
+            _remoteServerNodeProxy = remoteServerNodeProxy;
         }
 
         /// <summary>
@@ -44,9 +46,52 @@ namespace AgileConfig.Server.Apisite.Controllers
         /// <returns></returns>
         public IActionResult ServerNodeClients(string address)
         {
-            var report = Program.RemoteServerNodeProxy.GetClientsReport(address);
+            var report = _remoteServerNodeProxy.GetClientsReport(address);
 
             return Json(report);
+        }
+
+        public async Task<IActionResult> SearchServerNodeClients(string address, int current, int pageSize)
+        {
+            if (current <= 0)
+            {
+                throw new ArgumentException("current can not less than 1 .");
+            }
+            if (pageSize <= 0)
+            {
+                throw new ArgumentException("pageSize can not less than 1 .");
+            }
+            var addressess = new List<string>();
+            if (string.IsNullOrEmpty(address))
+            {
+                var nodes = await _serverNodeService.GetAllNodesAsync();
+                addressess.AddRange(nodes.Select(n => n.Address));
+            }
+            else
+            {
+                addressess.Add(address);
+            }
+
+            var clients = new List<ClientInfo>();
+            addressess.ForEach(addr =>
+            {
+                var report = _remoteServerNodeProxy.GetClientsReport(addr);
+                if (report != null && report.Infos != null)
+                {
+                    clients.AddRange(report.Infos);
+                }
+            });
+
+            var page = clients.OrderBy(i => i.Address).ThenBy(i => i.Id).Skip((current - 1) * pageSize).Take(pageSize);
+
+            return Json(new
+            {
+                current,
+                pageSize,
+                success = true,
+                total = clients.Count,
+                data = page
+            });
         }
 
         /// <summary>
@@ -88,10 +133,12 @@ namespace AgileConfig.Server.Apisite.Controllers
             var nodes = await _serverNodeService.GetAllNodesAsync();
             var result = new List<object>();
 
-            nodes.ForEach(n => {
-                result.Add(new { 
+            nodes.ForEach(n =>
+            {
+                result.Add(new
+                {
                     n,
-                    server_status = Program.RemoteServerNodeProxy.GetClientsReport(n.Address)
+                    server_status = _remoteServerNodeProxy.GetClientsReport(n.Address)
                 });
             });
 

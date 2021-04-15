@@ -32,25 +32,30 @@ namespace AgileConfig.Server.Apisite.Websocket
             _websocketCollection = WebsocketCollection.Instance;
         }
 
-        public async Task Invoke(HttpContext context, IAppService appService, IConfigService configService)
+        public async Task Invoke(HttpContext context, IAppBasicAuthService appBasicAuth, IConfigService configService)
         {
             if (context.Request.Path == "/ws")
             {
                 if (context.WebSockets.IsWebSocketRequest)
                 {
-                    var basicAuth = new BasicAuthenticationAttribute(appService);
-                    if (!await basicAuth.Valid(context.Request))
+                    if (!await appBasicAuth.ValidAsync(context.Request))
                     {
-                        await context.Response.WriteAsync("closed");
+                        await context.Response.WriteAsync("basic auth failed .");
                         return;
                     }
                     var appId = context.Request.Headers["appid"];
+                    if (string.IsNullOrEmpty(appId))
+                    {
+                        var appIdSecret = appBasicAuth.GetAppIdSecret(context.Request);
+                        appId = appIdSecret.Item1;
+                    }
                     WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync();
                     var client = new WebsocketClient()
                     {
                         Client = webSocket,
                         Id = Guid.NewGuid().ToString(),
-                        AppId = appId
+                        AppId = appId,
+                        LastHeartbeatTime = DateTime.Now
                     };
                     _websocketCollection.AddClient(client);
                     _logger.LogInformation("Websocket client {0} Added ", client.Id);
@@ -76,37 +81,40 @@ namespace AgileConfig.Server.Apisite.Websocket
             }
         }
 
-        private async Task Handle(HttpContext context, WebsocketClient webSocket, IConfigService configService)
+        private async Task Handle(HttpContext context, WebsocketClient socketClient, IConfigService configService)
         {
             var buffer = new byte[1024 * 2];
             WebSocketReceiveResult result = null;
             do
             {
-                result = await webSocket.Client.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-                webSocket.LastHeartbeatTime = DateTime.Now;
-                var message = await ConvertWebsocketMessage(result, buffer);
+                result = await socketClient.Client.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                socketClient.LastHeartbeatTime = DateTime.Now;
+                var message = await ReadWebsocketMessage(result, buffer);
                 if (message == "ping")
                 {
                     //如果是ping，回复本地数据的md5版本
                     var appId = context.Request.Headers["appid"];
-                    var md5 = await configService.AppPublishedConfigsMd5Cache(appId);
-                    var md5Data = Encoding.UTF8.GetBytes($"V:{md5}");
-
-                    await webSocket.Client.SendAsync(new ArraySegment<byte>(md5Data, 0, md5Data.Length), WebSocketMessageType.Text, true, CancellationToken.None);
+                    var md5 = await configService.AppPublishedConfigsMd5CacheWithInheritanced(appId);
+                    await SendMessage(socketClient.Client, $"V:{md5}");
                 }
-                else 
+                else
                 {
                     //如果不是心跳消息，回复0
-                    var zeroData = Encoding.UTF8.GetBytes("0");
-                    await webSocket.Client.SendAsync(new ArraySegment<byte>(zeroData, 0, zeroData.Length), WebSocketMessageType.Text, true, CancellationToken.None);
+                    await SendMessage(socketClient.Client, "0");
                 }
             }
             while (!result.CloseStatus.HasValue);
             _logger.LogInformation($"Websocket close , closeStatus:{result.CloseStatus} closeDesc:{result.CloseStatusDescription}");
-            await _websocketCollection.RemoveClient(webSocket, result.CloseStatus, result.CloseStatusDescription);
+            await _websocketCollection.RemoveClient(socketClient, result.CloseStatus, result.CloseStatusDescription);
         }
 
-        private async Task<string> ConvertWebsocketMessage(WebSocketReceiveResult result, ArraySegment<Byte> buffer)
+        private async Task SendMessage(WebSocket webSocket, string message)
+        {
+            var data = Encoding.UTF8.GetBytes(message);
+            await webSocket.SendAsync(new ArraySegment<byte>(data, 0, data.Length), WebSocketMessageType.Text, true, CancellationToken.None);
+        }
+
+        private async Task<string> ReadWebsocketMessage(WebSocketReceiveResult result, ArraySegment<Byte> buffer)
         {
             using (var ms = new MemoryStream())
             {

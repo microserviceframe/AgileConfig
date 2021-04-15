@@ -1,6 +1,5 @@
-﻿using System;
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
+﻿using FreeSql.DataAnnotations;
+using System;
 
 namespace AgileConfig.Server.Data.Entity
 {
@@ -16,38 +15,36 @@ namespace AgileConfig.Server.Data.Entity
         Online = 1,
     }
 
-    [Table("config")]
+    [Table(Name = "agc_config")]
     public class Config
     {
-        [Key]
-        [Column("id", TypeName = "varchar(36)")]
+        [Column(Name = "id", StringLength = 36)]
         public string Id { get; set; }
 
-        [Column("app_id", TypeName = "nvarchar(8)")]
+        [Column(Name = "app_id", StringLength = 36)]
         public string AppId { get; set; }
 
-        [Column("g", TypeName = "nvarchar(50)")]
+        [Column(Name = "g", StringLength = 100)]
         public string Group { get; set; }
 
-        [Column("k", TypeName = "nvarchar(50)")]
+        [Column(Name = "k", StringLength = 100)]
         public string Key { get; set; }
 
-        [Column("v", TypeName = "nvarchar(500)")]
         public string Value { get; set; }
 
-        [Column("description", TypeName = "nvarchar(100)")]
+        [Column(Name = "description", StringLength = 200)]
         public string Description { get; set; }
 
-        [Column("create_time")]
+        [Column(Name = "create_time")]
         public DateTime CreateTime { get; set; }
 
-        [Column("update_time")]
+        [Column(Name = "update_time")]
         public DateTime? UpdateTime { get; set; }
 
-        [Column("status")]
+        [Column(Name = "status")]
         public ConfigStatus Status { get; set; }
 
-        [Column("online_status")]
+        [Column(Name = "online_status")]
         public OnlineStatus OnlineStatus { get; set; }
     }
 }

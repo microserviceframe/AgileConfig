@@ -1,6 +1,7 @@
 ﻿using Agile.Config.Protocol;
 using AgileConfig.Server.Common;
 using AgileConfig.Server.Data.Entity;
+using AgileConfig.Server.Data.Freesql;
 using AgileConfig.Server.IService;
 using AgileHttp;
 using AgileHttp.serialize;
@@ -35,14 +36,13 @@ namespace AgileConfig.Server.Service
         private IServerNodeService _serverNodeService;
         private ILogger _logger;
         private ISysLogService _sysLogService;
-        private ConcurrentDictionary<string, ClientInfos> _serverNodeClientReports;
+        private static ConcurrentDictionary<string, ClientInfos> _serverNodeClientReports = new ConcurrentDictionary<string, ClientInfos>();
 
-        public RemoteServerNodeProxy (ISysLogService sysLogService,IServerNodeService serverNodeService, ILoggerFactory loggerFactory)
+        public RemoteServerNodeProxy (ILoggerFactory loggerFactory)
         {
-            _sysLogService = sysLogService;
-            _serverNodeService = serverNodeService;
+            _sysLogService = new SysLogService(new FreeSqlContext(FreeSQL.Instance));
+            _serverNodeService = new ServerNodeService(new FreeSqlContext(FreeSQL.Instance));
             _logger = loggerFactory.CreateLogger<RemoteServerNodeProxy>();
-            _serverNodeClientReports = new ConcurrentDictionary<string, ClientInfos>();
         }
 
         public async Task<bool> AllClientsDoActionAsync(string address, WebsocketAction action)
@@ -68,7 +68,7 @@ namespace AgileConfig.Server.Service
                 }
             }, 5);
 
-            await _sysLogService.AddSysLogSync(new SysLog
+            await _sysLogService.AddSysLogAsync(new SysLog
             {
                 LogTime = DateTime.Now,
                 LogType = result ? SysLogType.Normal : SysLogType.Warn,
@@ -101,7 +101,7 @@ namespace AgileConfig.Server.Service
                 }
             }, 5);
 
-            await _sysLogService.AddSysLogSync(new SysLog
+            await _sysLogService.AddSysLogAsync(new SysLog
             {
                 LogTime = DateTime.Now,
                 LogType = result ? SysLogType.Normal : SysLogType.Warn,
@@ -127,6 +127,19 @@ namespace AgileConfig.Server.Service
 
                         if ((bool)result.success)
                         {
+                            if (action.Action == ActionConst.Offline || action.Action == ActionConst.Remove)
+                            {
+                                if (_serverNodeClientReports.ContainsKey(address))
+                                {
+                                    if (_serverNodeClientReports[address].Infos != null)
+                                    {
+                                        var report = _serverNodeClientReports[address];
+                                        report.Infos.RemoveAll(c => c.Id == clientId);
+                                        report.ClientCount = report.Infos.Count;
+                                    }
+                                }
+                            }
+
                             return true;
                         }
                     }
@@ -135,7 +148,7 @@ namespace AgileConfig.Server.Service
                 }
             }, 5);
 
-            await _sysLogService.AddSysLogSync(new SysLog
+            await _sysLogService.AddSysLogAsync(new SysLog
             {
                 LogTime = DateTime.Now,
                 LogType = result ? SysLogType.Normal : SysLogType.Warn,
@@ -151,8 +164,60 @@ namespace AgileConfig.Server.Service
             {
                 return null;
             }
-            _serverNodeClientReports.TryGetValue(address, out IService.ClientInfos report);
+            _serverNodeClientReports.TryGetValue(address, out ClientInfos report);
+            if (report != null)
+            {
+                report.Infos?.ForEach(i =>
+                {
+                    i.Address = address;
+                });
+            }
+            if (report == null && address == "http://localhost:5000")
+            {
+               Console.WriteLine("report null");
+            }
             return report;
+        }
+
+        public async Task TestEchoAsync(string address)
+        {
+            var node = await _serverNodeService.GetAsync(address);
+            try
+            {
+                FunctionUtil.TRY(() =>
+                {
+                    using (var resp = (node.Address + "/home/echo").AsHttp().Send())
+                    {
+                        if (resp.StatusCode == System.Net.HttpStatusCode.OK && resp.GetResponseContent() == "ok")
+                        {
+                            node.LastEchoTime = DateTime.Now;
+                            node.Status = Data.Entity.NodeStatus.Online;
+                            var report = GetClientReport(node);
+                            if (report != null)
+                            {
+                                if (_serverNodeClientReports.ContainsKey(node.Address))
+                                {
+                                    _serverNodeClientReports[node.Address] = report;
+                                }
+                                else
+                                {
+                                    _serverNodeClientReports.AddOrUpdate(node.Address, report, (k, r) => report);
+                                }
+                                
+                            }
+                        }
+                        else
+                        {
+                            node.Status = Data.Entity.NodeStatus.Offline;
+                        }
+                        _serverNodeService.UpdateAsync(node);
+                    }
+                }, 5);
+            }
+            catch (Exception e)
+            {
+                _logger.LogInformation(e, "Try test node {0} echo , but fail .", node.Address);
+            }
         }
 
         public Task TestEchoAsync()
@@ -175,7 +240,11 @@ namespace AgileConfig.Server.Service
                                         n.LastEchoTime = DateTime.Now;
                                         n.Status = Data.Entity.NodeStatus.Online;
                                         var report = GetClientReport(n);
-                                        if (report != null)
+                                        if (_serverNodeClientReports.ContainsKey(n.Address))
+                                        {
+                                            _serverNodeClientReports[n.Address] = report;
+                                        }
+                                        else
                                         {
                                             _serverNodeClientReports.AddOrUpdate(n.Address, report, (k, r) => report);
                                         }
